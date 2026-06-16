@@ -1,0 +1,70 @@
+name: citra-libretro-linux-arm64
+
+on:
+  push:
+    branches: [ "*" ]
+    tags: [ "*" ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  CORE_ARGS: -DENABLE_LIBRETRO=ON
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+
+jobs:
+  libretro-linux-arm64:
+    runs-on: ubuntu-22.04-arm
+    env:
+      OS: linux
+      TARGET: arm64
+      BUILD_DIR: build/linux-arm64
+      EXTRA_PATH: bin/Release
+      EXTRA_CORE_ARGS: -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DENABLE_LTO=OFF
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y llvm
+
+      - name: Build
+        run: |
+          cmake $CORE_ARGS $EXTRA_CORE_ARGS . -B $BUILD_DIR
+          cmake --build $BUILD_DIR --target azahar_libretro --config Release -j $(nproc)
+          llvm-strip -s $BUILD_DIR/$EXTRA_PATH/azahar_libretro.*
+
+      - name: Pack
+        run: ./.ci/libretro-pack.sh
+
+      - name: Generate SBOM
+        if: ${{ github.ref_type == 'tag' }}
+        uses: anchore/sbom-action@v0
+        with:
+          path: build/
+          format: spdx-json
+          output-file: libretro-linux-arm64.spdx.json
+          upload-artifact: false
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.OS }}-${{ env.TARGET }}
+          path: |
+            ./*.zip
+            ./*.spdx.json
+
+      - name: Attest artifacts
+        if: ${{ github.ref_type == 'tag' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ./*.zip
+          sbom-path: libretro-linux-arm64.spdx.json
