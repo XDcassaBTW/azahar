@@ -1,0 +1,65 @@
+name: azahar-libretro-ios
+
+on:
+  push:
+    branches: [ "*" ]
+    tags: [ "*" ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  CORE_ARGS: -DENABLE_LIBRETRO=ON
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+
+jobs:
+  libretro-ios:
+    runs-on: macos-26
+    env:
+      OS: ios
+      TARGET: arm64
+      BUILD_DIR: build/ios-arm64
+      EXTRA_PATH: bin/Release
+      EXTRA_CORE_ARGS: -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_FLAGS=-DIOS -DCMAKE_CXX_FLAGS=-DIOS -DIOS=ON -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCITRA_USE_PRECOMPILED_HEADERS=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DENABLE_OPT=OFF
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build
+        run: |
+          cmake $CORE_ARGS $EXTRA_CORE_ARGS . -B $BUILD_DIR
+          cmake --build $BUILD_DIR --target azahar_libretro --config Release
+          strip -x $BUILD_DIR/$EXTRA_PATH/azahar_libretro.*
+
+      - name: Pack
+        run: ./.ci/libretro-pack.sh
+
+      - name: Generate SBOM
+        if: ${{ github.ref_type == 'tag' }}
+        uses: anchore/sbom-action@v0
+        with:
+          path: build/
+          format: spdx-json
+          output-file: libretro-ios.spdx.json
+          upload-artifact: false
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.OS }}-${{ env.TARGET }}
+          path: |
+            ./*.zip
+            ./*.spdx.json
+
+      - name: Attest artifacts
+        if: ${{ github.ref_type == 'tag' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ./*.zip
+          sbom-path: libretro-ios.spdx.json
